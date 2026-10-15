@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Aquarium Control</title>
+  <!-- Nhúng thư viện MQTT.js -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f6f9;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      justify-content: center;
+    }
+    .container {
+      background: white;
+      max-width: 420px;
+      width: 100%;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    h2 {
+      text-align: center;
+      margin-top: 0;
+      color: #333;
+    }
+    .status-bar {
+      text-align: center;
+      padding: 8px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      font-weight: bold;
+      background-color: #ffeaa7;
+      color: #d63031;
+    }
+    .card {
+      border: 1px solid #e1e8ed;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 16px;
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #2d3436;
+    }
+    .btn-group {
+      display: flex;
+      gap: 10px;
+    }
+    button {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .btn-on { background-color: #00b894; color: white; }
+    .btn-on:hover { background-color: #009874; }
+    .btn-off { background-color: #d63031; color: white; }
+    .btn-off:hover { background-color: #b52223; }
+    .sensor-val {
+      font-size: 20px;
+      font-weight: bold;
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 6px;
+    }
+    .val-full { background-color: #dff9fb; color: #0984e3; }
+    .val-low { background-color: #ffbe76; color: #d35400; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h2>Bể Cá Thông Minh</h2>
+    <div id="conn-status" class="status-bar">Đang kết nối MQTT...</div>
+
+    <!-- Điều khiển Bơm (K1) -->
+    <div class="card">
+      <div class="card-title">Máy Bơm (Chân 14)</div>
+      <div class="btn-group">
+        <button class="btn-on" onclick="sendMQTT('smart_aquarium/esp32s3/k1', 'on')">BẬT</button>
+        <button class="btn-off" onclick="sendMQTT('smart_aquarium/esp32s3/k1', 'off')">TẮT</button>
+      </div>
+    </div>
+
+    <!-- Điều khiển Đèn LED -->
+    <div class="card">
+      <div class="card-title">Đèn LED (Chân 21)</div>
+      <div class="btn-group">
+        <button class="btn-on" onclick="sendMQTT('smart_aquarium/esp32s3/pump', 'on')">BẬT</button>
+        <button class="btn-off" onclick="sendMQTT('smart_aquarium/esp32s3/pump', 'off')">TẮT</button>
+      </div>
+    </div>
+
+    <!-- Hiển thị Trạng thái Phao Nước -->
+    <div class="card">
+      <div class="card-title">Mực Nước (Phao - Chân 11)</div>
+      <div id="phao-display" class="sensor-val val-low">Đang chờ dữ liệu...</div>
+    </div>
+  </div>
+
+  <script>
+    // Kết nối qua cổng WebSocket bảo mật (WSS 8084) của EMQX
+    const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
+    const clientId = 'web_client_' + Math.random().toString(16).substr(2, 8);
+
+    const client = mqtt.connect(brokerUrl, {
+      clientId: clientId,
+      clean: true,
+      connectTimeout: 4000
+    });
+
+    const statusEl = document.getElementById('conn-status');
+    const phaoEl = document.getElementById('phao-display');
+
+    client.on('connect', () => {
+      statusEl.innerText = 'Đã kết nối Broker EMQX';
+      statusEl.style.backgroundColor = '#55efc4';
+      statusEl.style.color = '#00b894';
+
+      // Đăng ký nhận tin từ topic phao nước của ESP32
+      client.subscribe('smart_aquarium/esp32s3/muc_nuoc', (err) => {
+        if (!err) {
+          console.log('Subscribed to topic muc_nuoc');
+        }
+      });
+    });
+
+    client.on('error', (err) => {
+      statusEl.innerText = 'Lỗi kết nối MQTT';
+      statusEl.style.backgroundColor = '#ff7675';
+      statusEl.style.color = '#fff';
+      console.error(err);
+    });
+
+    // Nhận dữ liệu từ ESP32 gửi lên
+    client.on('message', (topic, message) => {
+      const payload = message.toString();
+      console.log(`[${topic}]: ${payload}`);
+
+      if (topic === 'smart_aquarium/esp32s3/muc_nuoc') {
+        if (payload === '1') {
+          phaoEl.innerText = 'NƯỚC ĐẦY (1)';
+          phaoEl.className = 'sensor-val val-full';
+        } else if (payload === '0') {
+          phaoEl.innerText = 'CẠN NƯỚC (0)';
+          phaoEl.className = 'sensor-val val-low';
+        }
+      }
+    });
+
+    // Hàm gửi lệnh xuống ESP32
+    function sendMQTT(topic, cmd) {
+      if (client.connected) {
+        client.publish(topic, cmd);
+        console.log(`Sent [${topic}]: ${cmd}`);
+      } else {
+        alert('Chưa kết nối tới Broker!');
+      }
+    }
+  </script>
+</body>
+</html>

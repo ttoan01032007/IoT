@@ -3,171 +3,1697 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Aquarium Control</title>
-  <!-- Nhúng thư viện MQTT.js -->
-  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <title>Bể Cá Thông Minh - Smart Aquarium Control</title>
+  <meta name="description" content="Bảng điều khiển và giám sát bể cá thông minh qua MQTT broker với giao diện Tailwind CSS hiện đại, trực quan, hỗ trợ điều khiển bơm, đèn LED, quạt, chiller và cảm biến phao nước.">
+
+  <!-- Polyfill setter for window.fetch to avoid extension errors -->
+  <script>
+    (function() {
+      try {
+        var _fetch = window.fetch ? window.fetch.bind(window) : undefined;
+        Object.defineProperty(window, 'fetch', {
+          get: function() { return _fetch; },
+          set: function(fn) { _fetch = fn; },
+          configurable: true,
+          enumerable: true
+        });
+      } catch (e) {}
+    })();
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- MQTT.js library via CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.5.0/mqtt.min.js"></script>
+
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f4f6f9;
-      margin: 0;
-      padding: 20px;
-      display: flex;
-      justify-content: center;
+    @keyframes wave {
+      0% { transform: translateX(0) scaleY(1); }
+      50% { transform: translateX(-25%) scaleY(0.85); }
+      100% { transform: translateX(-50%) scaleY(1); }
     }
-    .container {
-      background: white;
-      max-width: 420px;
-      width: 100%;
-      padding: 24px;
-      border-radius: 12px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    @keyframes bubble {
+      0% { transform: translateY(100%) scale(0.6); opacity: 0; }
+      50% { opacity: 0.8; }
+      100% { transform: translateY(-20%) scale(1.1); opacity: 0; }
     }
-    h2 {
-      text-align: center;
-      margin-top: 0;
-      color: #333;
+    .animate-wave {
+      animation: wave 10s cubic-bezier(0.36, 0.45, 0.63, 0.53) infinite;
     }
-    .status-bar {
-      text-align: center;
-      padding: 8px;
-      margin-bottom: 20px;
-      border-radius: 6px;
-      font-weight: bold;
-      background-color: #ffeaa7;
-      color: #d63031;
-    }
-    .card {
-      border: 1px solid #e1e8ed;
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-    .card-title {
-      font-size: 16px;
-      font-weight: bold;
-      margin-bottom: 10px;
-      color: #2d3436;
-    }
-    .btn-group {
-      display: flex;
-      gap: 10px;
-    }
-    button {
-      flex: 1;
-      padding: 12px;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
-      font-weight: bold;
-      cursor: pointer;
-      transition: 0.2s;
-    }
-    .btn-on { background-color: #00b894; color: white; }
-    .btn-on:hover { background-color: #009874; }
-    .btn-off { background-color: #d63031; color: white; }
-    .btn-off:hover { background-color: #b52223; }
-    .sensor-val {
-      font-size: 20px;
-      font-weight: bold;
-      display: inline-block;
-      padding: 6px 12px;
-      border-radius: 6px;
-    }
-    .val-full { background-color: #dff9fb; color: #0984e3; }
-    .val-low { background-color: #ffbe76; color: #d35400; }
+    .bubble-1 { animation: bubble 3.5s ease-in-out infinite; }
+    .bubble-2 { animation: bubble 5.5s ease-in-out 1.2s infinite; }
+    .bubble-3 { animation: bubble 4.5s ease-in-out 2.5s infinite; }
+    .bubble-4 { animation: bubble 6s ease-in-out 0.5s infinite; }
   </style>
 </head>
-<body>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased selection:bg-cyan-500/30 selection:text-cyan-200 font-sans flex flex-col">
 
-  <div class="container">
-    <h2>Bể Cá Thông Minh</h2>
-    <div id="conn-status" class="status-bar">Đang kết nối MQTT...</div>
+  <!-- Top Sticky Header -->
+  <header class="sticky top-0 z-40 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between gap-4 h-16">
+        <!-- Brand Wordmark -->
+        <div class="flex items-center gap-3 shrink-0">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-900/30">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+              <rect x="9" y="9" width="6" height="6" />
+              <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" />
+            </svg>
+          </div>
+          <div class="leading-tight">
+            <span class="text-base sm:text-lg font-bold tracking-tight text-white whitespace-nowrap">
+              AquaSmart <span class="text-cyan-400 font-semibold text-xs px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-800/60 ml-1">ESP32-S3</span>
+            </span>
+          </div>
+        </div>
 
-    <!-- Điều khiển Bơm (K1) -->
-    <div class="card">
-      <div class="card-title">Máy Bơm (Chân 14)</div>
-      <div class="btn-group">
-        <button class="btn-on" onclick="sendMQTT('smart_aquarium/esp32s3/k1', 'on')">BẬT</button>
-        <button class="btn-off" onclick="sendMQTT('smart_aquarium/esp32s3/k1', 'off')">TẮT</button>
+        <!-- Desktop Navigation Tabs -->
+        <nav class="hidden md:flex items-center gap-1 text-sm font-medium">
+          <button id="nav-btn-dashboard" onclick="switchTab('dashboard')" class="px-3.5 py-1.5 rounded-lg bg-slate-800 text-cyan-300 font-semibold transition-colors">
+            Bảng điều khiển
+          </button>
+          <button id="nav-btn-logs" onclick="switchTab('logs')" class="px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-900 transition-colors">
+            Nhật ký MQTT
+          </button>
+          <button id="nav-btn-wiring" onclick="openWiringModal()" class="px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-900 transition-colors">
+            Sơ đồ chân ESP32
+          </button>
+        </nav>
+
+        <!-- Connection Badge & Settings -->
+        <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+          <button id="conn-badge" onclick="reconnectMQTT()" title="Nhấn để kết nối lại" class="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-amber-950/60 border-amber-700/50 text-amber-300 transition-all">
+            <span id="conn-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+            <span id="conn-text" class="hidden sm:inline">Đang kết nối...</span>
+            <svg id="conn-icon" class="w-4 h-4 animate-spin text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+              <path d="M16 21h5v-5" />
+            </svg>
+          </button>
+
+          <button onclick="openSettingsModal()" title="Cấu hình MQTT Broker" class="p-2 rounded-lg border border-slate-800 bg-slate-900/80 text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Mobile Tab Strip -->
+      <div class="flex md:hidden border-t border-slate-800/60 py-2 gap-2">
+        <button id="mob-nav-dashboard" onclick="switchTab('dashboard')" class="flex-1 py-1.5 rounded-md text-xs font-semibold text-center bg-cyan-950 text-cyan-300 border border-cyan-800">
+          Điều khiển
+        </button>
+        <button id="mob-nav-logs" onclick="switchTab('logs')" class="flex-1 py-1.5 rounded-md text-xs font-semibold text-center text-slate-400 bg-slate-900">
+          Nhật ký MQTT
+        </button>
+        <button onclick="openWiringModal()" class="flex-1 py-1.5 rounded-md text-xs font-semibold text-center text-slate-400 bg-slate-900">
+          Sơ đồ chân
+        </button>
       </div>
     </div>
+  </header>
 
-    <!-- Điều khiển Đèn LED -->
-    <div class="card">
-      <div class="card-title">Đèn LED (Chân 21)</div>
-      <div class="btn-group">
-        <button class="btn-on" onclick="sendMQTT('smart_aquarium/esp32s3/pump', 'on')">BẬT</button>
-        <button class="btn-off" onclick="sendMQTT('smart_aquarium/esp32s3/pump', 'off')">TẮT</button>
-      </div>
-    </div>
-
-    <!-- Hiển thị Trạng thái Phao Nước -->
-    <div class="card">
-      <div class="card-title">Mực Nước (Phao - Chân 11)</div>
-      <div id="phao-display" class="sensor-val val-low">Đang chờ dữ liệu...</div>
+  <!-- Toast Notification Container -->
+  <div id="toast-box" class="fixed top-20 right-4 z-50 transition-all duration-300 transform translate-y-[-20px] opacity-0 pointer-events-none">
+    <div class="p-3.5 rounded-xl bg-slate-900 border border-cyan-700/60 text-slate-100 text-xs shadow-2xl flex items-center gap-3">
+      <svg class="w-4 h-4 text-cyan-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="16" x2="12" y2="12" />
+        <line x1="12" y1="8" x2="12.01" y2="8" />
+      </svg>
+      <span id="toast-text">Thông báo</span>
     </div>
   </div>
 
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- KPI / Top Metric Summary Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+      <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center gap-3">
+        <div class="p-2.5 rounded-lg bg-cyan-500/10 text-cyan-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <div>
+          <div class="text-[11px] text-slate-400 font-medium">Thiết Bị Đang Chạy</div>
+          <div class="text-base sm:text-lg font-bold text-white font-mono tabular-nums">
+            <span id="stat-active-count">0</span> <span class="text-xs text-slate-500 font-normal">/ 4</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center gap-3">
+        <div id="stat-water-icon-bg" class="p-2.5 rounded-lg bg-slate-800 text-slate-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+        </div>
+        <div>
+          <div class="text-[11px] text-slate-400 font-medium">Phao Nước (Chân 11)</div>
+          <div id="stat-water-text" class="text-xs sm:text-sm font-bold text-slate-400">
+            Chờ tín hiệu...
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center gap-3">
+        <div class="p-2.5 rounded-lg bg-indigo-500/10 text-indigo-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        </div>
+        <div class="truncate">
+          <div class="text-[11px] text-slate-400 font-medium">MQTT Broker</div>
+          <div id="stat-broker-text" class="text-xs sm:text-sm font-semibold text-white truncate font-mono">
+            broker.emqx.io
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center gap-3">
+        <div id="stat-health-icon-bg" class="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div>
+          <div class="text-[11px] text-slate-400 font-medium">Trạng Thái Hồ</div>
+          <div id="stat-health-text" class="text-xs sm:text-sm font-bold text-emerald-400">
+            Hoạt Động Tốt
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW 1: DASHBOARD -->
+    <div id="view-dashboard" class="space-y-6">
+
+      <!-- Section: Water Tank Cross-Section Visualizer -->
+      <div class="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 sm:p-6 shadow-xl relative overflow-hidden backdrop-blur-sm">
+        <div id="tank-ambient-glow" class="absolute -top-24 -right-24 w-72 h-72 rounded-full blur-3xl pointer-events-none transition-all duration-700 bg-cyan-500/10"></div>
+
+        <div class="flex flex-col lg:flex-row items-stretch gap-6 relative z-10">
+          <!-- Left: Tank Graphic -->
+          <div class="lg:w-7/12 flex flex-col justify-between">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <div class="flex items-center gap-2">
+                  <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path d="M2 12s3-3 6-3 6 3 6 3 3-3 6-3 6 3 6 3" />
+                  </svg>
+                  <h3 class="text-base sm:text-lg font-bold text-white tracking-tight">
+                    Mực Nước & Cảm Biến Phao
+                  </h3>
+                </div>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  Cảm biến phao cơ kết nối GPIO 11 (ESP32-S3)
+                </p>
+              </div>
+
+              <!-- Live Badge -->
+              <div id="phao-display-badge" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs sm:text-sm font-semibold">
+                <span>Chờ dữ liệu...</span>
+              </div>
+            </div>
+
+            <!-- Virtual Glass Aquarium Tank -->
+            <div class="relative h-56 sm:h-64 w-full rounded-xl border-2 border-slate-700/80 bg-slate-950/80 overflow-hidden shadow-inner flex flex-col justify-end">
+              <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.03] to-transparent pointer-events-none z-20"></div>
+
+              <!-- Float Sensor Rod & Ball Assembly -->
+              <div class="absolute top-0 right-10 z-20 flex flex-col items-center">
+                <div class="w-8 h-2 bg-slate-600 rounded-b"></div>
+                <div class="w-1.5 h-36 bg-gradient-to-r from-slate-400 to-slate-200 shadow"></div>
+                <!-- Float donut ball -->
+                <div id="float-sensor-ball" class="w-7 h-5 rounded-full border border-slate-400 shadow-md transition-all duration-700 flex items-center justify-center -translate-y-12 bg-slate-300 text-slate-800">
+                  <div class="w-2 h-2 rounded-full bg-slate-800"></div>
+                </div>
+                <div class="text-[10px] text-slate-400 font-mono mt-1 bg-slate-950/80 px-1 py-0.5 rounded border border-slate-800">
+                  Chân 11
+                </div>
+              </div>
+
+              <!-- Depth Measurement Grid -->
+              <div class="absolute left-3 top-4 bottom-4 flex flex-col justify-between text-[10px] text-slate-400 font-mono select-none z-20">
+                <span class="flex items-center gap-1"><span class="w-2 h-[1px] bg-slate-600 inline-block"></span> 100% (Đầy)</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-[1px] bg-slate-600 inline-block"></span> 75%</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-[1px] bg-slate-600 inline-block"></span> 50%</span>
+                <span class="flex items-center gap-1 text-rose-400 font-semibold"><span class="w-2 h-[1px] bg-rose-500 inline-block"></span> 25% (Ngưỡng cạn)</span>
+              </div>
+
+              <!-- Water Liquid Body -->
+              <div id="tank-water-body" class="w-full transition-all duration-1000 relative overflow-hidden bg-gradient-to-t from-cyan-950/90 via-blue-900/60 to-cyan-800/40" style="height: 50%;">
+                <!-- Waves -->
+                <div class="absolute top-0 left-0 w-[200%] h-6 -translate-y-3 opacity-70">
+                  <svg class="w-full h-full animate-wave fill-cyan-400/25" viewBox="0 0 1200 120" preserveAspectRatio="none">
+                    <path d="M0,0 C150,90 350,-40 500,50 C650,140 900,10 1200,40 L1200,120 L0,120 Z"></path>
+                  </svg>
+                </div>
+
+                <!-- Rising Bubbles -->
+                <div class="absolute inset-0 pointer-events-none overflow-hidden">
+                  <div class="absolute left-1/4 w-2 h-2 rounded-full bg-white/40 bubble-1"></div>
+                  <div class="absolute left-1/2 w-1.5 h-1.5 rounded-full bg-cyan-200/50 bubble-2"></div>
+                  <div class="absolute left-3/4 w-2.5 h-2.5 rounded-full bg-white/30 bubble-3"></div>
+                  <div class="absolute left-1/3 w-1.5 h-1.5 rounded-full bg-cyan-100/60 bubble-4"></div>
+                </div>
+
+                <!-- Gravel bed -->
+                <div class="absolute bottom-0 left-0 right-0 h-3 bg-gradient-to-r from-amber-950/70 via-stone-800 to-amber-950/70 border-t border-slate-700/40"></div>
+              </div>
+
+              <!-- Center Water Level Label -->
+              <div class="absolute bottom-5 left-1/2 -translate-x-1/2 text-center pointer-events-none z-20">
+                <span id="tank-water-percent-label" class="text-xs font-mono font-bold tracking-wider uppercase text-cyan-200/90 drop-shadow">
+                  Chờ đo lường mực nước
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Telemetry & Safety Alerts -->
+          <div class="lg:w-5/12 flex flex-col justify-between gap-4">
+            <div class="space-y-3">
+              <div class="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-xs">
+                <div class="flex items-center justify-between text-slate-400 mb-1.5">
+                  <span>Giá trị phao (Chân 11):</span>
+                  <span id="detail-phao-val" class="font-mono text-white font-bold tabular-nums">N/A</span>
+                </div>
+                <div class="flex items-center justify-between text-slate-400 mb-1.5">
+                  <span>Cập nhật lần cuối:</span>
+                  <span id="detail-phao-time" class="font-mono text-cyan-300 tabular-nums">Chưa nhận dữ liệu</span>
+                </div>
+                <div class="flex items-center justify-between text-slate-400">
+                  <span>Topic đăng ký:</span>
+                  <span id="detail-phao-topic" class="font-mono text-slate-300 truncate max-w-[190px]">
+                    smart_aquarium/.../muc_nuoc
+                  </span>
+                </div>
+              </div>
+
+              <!-- Safety Alert Container -->
+              <div id="tank-safety-alert" class="hidden p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-200 text-xs space-y-2">
+                <div class="flex items-center gap-2 font-bold text-rose-300">
+                  <svg class="w-4 h-4 shrink-0 text-rose-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span>Cảnh báo an toàn: Mực nước cạn!</span>
+                </div>
+                <p class="leading-relaxed text-slate-300">
+                  Nước trong hồ đang ở mức thấp (0). Nếu máy bơm vẫn hoạt động, có thể xảy ra hiện tượng cháy motor do chạy khô.
+                </p>
+                <button onclick="emergencyStopPump()" class="w-full py-2 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-rose-900/40">
+                  Ngắt máy bơm khẩn cấp
+                </button>
+              </div>
+
+              <div id="tank-normal-alert" class="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 text-xs">
+                <div class="flex items-center gap-2 font-semibold">
+                  <svg class="w-4 h-4 shrink-0 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <span>Mực nước an toàn</span>
+                </div>
+                <p class="mt-1 text-slate-300 leading-relaxed">
+                  Mực nước đạt tiêu chuẩn cho cá và hệ thống lọc vi sinh vận hành tốt.
+                </p>
+              </div>
+            </div>
+
+            <!-- Simulation Controls -->
+            <div class="pt-2 border-t border-slate-800/80">
+              <div class="text-[11px] font-medium text-slate-400 flex items-center gap-1 mb-2">
+                <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                <span>Mô phỏng thử nghiệm phao nước (không cần cắm ESP32):</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <button onclick="simulateWater('1')" class="py-2 px-3 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-cyan-950 hover:text-cyan-300 hover:border-cyan-700 border border-slate-700 transition-all">
+                  Mô phỏng ĐẦY (1)
+                </button>
+                <button onclick="simulateWater('0')" class="py-2 px-3 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-rose-950 hover:text-rose-300 hover:border-rose-700 border border-slate-700 transition-all">
+                  Mô phỏng CẠN (0)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Smart Presets & SEQUENTIAL RELAY TEST SWITCH -->
+      <div class="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-lg space-y-4">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+              <span>Kịch Bản Nhanh & Kiểm Thử Relay</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Tự động hóa chăm sóc thủy sinh và công tắc kiểm tra tuần tự 4 relay
+            </p>
+          </div>
+
+          <!-- Feeding timer badge -->
+          <div id="feeding-timer-badge" class="hidden items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-950/90 border border-cyan-800 text-cyan-300 text-xs">
+            <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+            <span>Cho ăn: <b id="feeding-time-left" class="font-mono">05:00</b></span>
+            <button onclick="cancelFeeding()" class="ml-1 text-[11px] underline hover:text-white">
+              Hủy / Bật lại bơm
+            </button>
+          </div>
+        </div>
+
+        <!-- THE SEQUENTIAL RELAY TEST CARD (RHYTHMIC DANCE MODE) -->
+        <div id="relay-test-card" class="p-4 rounded-xl border border-slate-800 bg-slate-950/70 transition-all duration-300">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+              <div id="relay-test-icon-box" class="p-2.5 rounded-xl bg-slate-800 text-slate-400 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              </div>
+
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-bold text-white tracking-tight">
+                    Công Tắc Test Nhịp Điệu Relay (Tiếp Điểm Nhảy Múa)
+                  </span>
+                  <span id="relay-test-live-badge" class="hidden px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                    ĐANG NHẢY MÚA THEO NHỊP
+                  </span>
+                </div>
+                <p id="relay-test-desc" class="text-xs text-slate-400 mt-0.5">
+                  Bật lần lượt từng relay cách nhau 300ms → Tắt lần lượt từng relay cách nhau 300ms
+                </p>
+              </div>
+            </div>
+
+            <!-- Toggle Switch & Button -->
+            <div class="flex items-center gap-3 shrink-0">
+              <!-- Switch toggle -->
+              <button id="relay-test-switch" type="button" role="switch" onclick="toggleRelaySequenceTest()" class="relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out bg-slate-700">
+                <span id="relay-test-knob" class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out translate-x-0"></span>
+              </button>
+
+              <button id="relay-test-btn" onclick="toggleRelaySequenceTest()" class="px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 shadow">
+                <svg id="relay-test-btn-icon" class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span id="relay-test-btn-text">BẬT TEST</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Phase Indicator & Steps Progress Strip -->
+          <div class="mt-4 pt-3.5 border-t border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+            <!-- 4 Step badges with active state -->
+            <div class="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
+              <div id="step-badge-0" class="px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 bg-slate-900 border-slate-800 text-slate-400 transition-all">
+                <span class="font-mono text-[10px] opacity-75">1.</span>
+                <span>Máy Bơm</span>
+                <span id="step-tag-0" class="text-[9px] font-bold px-1 rounded uppercase bg-slate-800 text-slate-400">TẮT</span>
+              </div>
+              <div id="step-badge-1" class="px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 bg-slate-900 border-slate-800 text-slate-400 transition-all">
+                <span class="font-mono text-[10px] opacity-75">2.</span>
+                <span>Đèn LED</span>
+                <span id="step-tag-1" class="text-[9px] font-bold px-1 rounded uppercase bg-slate-800 text-slate-400">TẮT</span>
+              </div>
+              <div id="step-badge-2" class="px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 bg-slate-900 border-slate-800 text-slate-400 transition-all">
+                <span class="font-mono text-[10px] opacity-75">3.</span>
+                <span>Quạt Tản Nhiệt</span>
+                <span id="step-tag-2" class="text-[9px] font-bold px-1 rounded uppercase bg-slate-800 text-slate-400">TẮT</span>
+              </div>
+              <div id="step-badge-3" class="px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 bg-slate-900 border-slate-800 text-slate-400 transition-all">
+                <span class="font-mono text-[10px] opacity-75">4.</span>
+                <span>Máy Làm Lạnh</span>
+                <span id="step-tag-3" class="text-[9px] font-bold px-1 rounded uppercase bg-slate-800 text-slate-400">TẮT</span>
+              </div>
+            </div>
+
+            <!-- Controls: Speed & Loop Mode -->
+            <div class="flex items-center gap-2 shrink-0">
+              <!-- Speed Selector with 300ms default -->
+              <div class="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded-lg border border-slate-800 text-[11px]">
+                <span class="text-slate-400">Nhịp:</span>
+                <button onclick="setTestSpeed(150)" id="speed-btn-150" class="px-1.5 py-0.5 rounded text-slate-400 hover:text-white transition-colors">150ms</button>
+                <button onclick="setTestSpeed(300)" id="speed-btn-300" class="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-bold transition-colors">300ms</button>
+                <button onclick="setTestSpeed(500)" id="speed-btn-500" class="px-1.5 py-0.5 rounded text-slate-400 hover:text-white transition-colors">500ms</button>
+                <button onclick="setTestSpeed(800)" id="speed-btn-800" class="px-1.5 py-0.5 rounded text-slate-400 hover:text-white transition-colors">800ms</button>
+              </div>
+
+              <!-- Loop button -->
+              <button id="loop-mode-btn" onclick="toggleLoopMode()" class="px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 bg-amber-950/60 border-amber-600 text-amber-300 transition-colors">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                <span id="loop-mode-text">Nhảy múa liên tục</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 Presets Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <button onclick="triggerFeedingMode()" class="p-3.5 rounded-xl border bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-200 hover:bg-slate-900 text-left transition-all duration-200 flex flex-col justify-between">
+            <div class="flex items-center justify-between mb-2">
+              <div class="p-2 rounded-lg bg-cyan-500/10 text-cyan-400">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+              </div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold text-white">Cho Cá Ăn (5p)</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">Tạm dừng bơm 5 phút</div>
+            </div>
+          </button>
+
+          <button onclick="triggerNightMode()" class="p-3.5 rounded-xl border bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-200 hover:bg-slate-900 text-left transition-all duration-200 flex flex-col justify-between">
+            <div class="flex items-center justify-between mb-2">
+              <div class="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              </div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold text-white">Chế Độ Ban Đêm</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">Tắt đèn LED, giữ lọc/quạt</div>
+            </div>
+          </button>
+
+          <button onclick="sendAll('on')" class="p-3.5 rounded-xl border bg-slate-950/60 border-slate-800 hover:border-emerald-700/60 text-slate-200 hover:bg-emerald-950/20 text-left transition-all duration-200 flex flex-col justify-between group">
+            <div class="flex items-center justify-between mb-2">
+              <div class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:scale-110 transition-transform">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold text-white group-hover:text-emerald-300">Bật Tất Cả</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">Kích hoạt cả 4 thiết bị</div>
+            </div>
+          </button>
+
+          <button onclick="sendAll('off')" class="p-3.5 rounded-xl border bg-slate-950/60 border-slate-800 hover:border-rose-700/60 text-slate-200 hover:bg-rose-950/20 text-left transition-all duration-200 flex flex-col justify-between group">
+            <div class="flex items-center justify-between mb-2">
+              <div class="p-2 rounded-lg bg-rose-500/10 text-rose-400 group-hover:scale-110 transition-transform">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+              </div>
+            </div>
+            <div>
+              <div class="text-xs font-semibold text-white group-hover:text-rose-300">Tắt Toàn Bộ</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">Bảo trì / Thay nước hồ</div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Section: 4 Actuator Control Cards -->
+      <div>
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-base sm:text-lg font-bold text-white tracking-tight">
+              Điều Khiển Thiết Bị Phụ Trợ
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Hỗ trợ công tắc gạt và cặp nút BẬT / TẮT gửi lệnh trực tiếp qua MQTT
+            </p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <!-- Card 1: Máy Bơm -->
+          <div id="card-pump" class="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-5 flex flex-col justify-between transition-all duration-300">
+            <div>
+              <div class="flex items-start justify-between gap-3 mb-3">
+                <div class="flex items-center gap-3">
+                  <div id="icon-pump-box" class="p-3 rounded-xl bg-slate-800 text-slate-400 transition-all">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                  </div>
+                  <div>
+                    <h4 class="text-base font-bold text-white">Máy Bơm Nước</h4>
+                    <p class="text-xs text-slate-400 line-clamp-1">Lọc & tuần hoàn nước</p>
+                  </div>
+                </div>
+
+                <!-- Toggle Switch -->
+                <button type="button" role="switch" onclick="toggleDevice('pump')" class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 bg-slate-700">
+                  <span id="toggle-pump-knob" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 translate-x-0"></span>
+                </button>
+              </div>
+
+              <!-- State Tag -->
+              <div class="flex items-center justify-between text-xs py-2 px-3 rounded-lg bg-slate-950/60 border border-slate-800/70 mb-4">
+                <div class="flex items-center gap-1.5">
+                  <span id="dot-pump" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                  <span id="text-pump-state" class="font-medium text-slate-400">ĐANG TẮT</span>
+                </div>
+                <span class="text-slate-400 font-mono text-[11px]">.../pump</span>
+              </div>
+            </div>
+
+            <!-- Dual Buttons -->
+            <div class="grid grid-cols-2 gap-2.5 pt-2">
+              <button id="btn-pump-on" onclick="sendMQTT('pump', 'on')" class="py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/80 hover:text-white">
+                BẬT
+              </button>
+              <button id="btn-pump-off" onclick="sendMQTT('pump', 'off')" class="py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-rose-950/80 text-rose-300 border border-rose-800/60">
+                TẮT
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 2: Đèn LED -->
+          <div id="card-led" class="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-5 flex flex-col justify-between transition-all duration-300">
+            <div>
+              <div class="flex items-start justify-between gap-3 mb-3">
+                <div class="flex items-center gap-3">
+                  <div id="icon-led-box" class="p-3 rounded-xl bg-slate-800 text-slate-400 transition-all">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41M12 6a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/></svg>
+                  </div>
+                  <div>
+                    <h4 class="text-base font-bold text-white">Đèn Thủy Sinh</h4>
+                    <p class="text-xs text-slate-400 line-clamp-1">Quang hợp & màu cá</p>
+                  </div>
+                </div>
+
+                <!-- Toggle Switch -->
+                <button type="button" role="switch" onclick="toggleDevice('led')" class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 bg-slate-700">
+                  <span id="toggle-led-knob" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 translate-x-0"></span>
+                </button>
+              </div>
+
+              <!-- State Tag -->
+              <div class="flex items-center justify-between text-xs py-2 px-3 rounded-lg bg-slate-950/60 border border-slate-800/70 mb-4">
+                <div class="flex items-center gap-1.5">
+                  <span id="dot-led" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                  <span id="text-led-state" class="font-medium text-slate-400">ĐANG TẮT</span>
+                </div>
+                <span class="text-slate-400 font-mono text-[11px]">.../led</span>
+              </div>
+            </div>
+
+            <!-- Dual Buttons -->
+            <div class="grid grid-cols-2 gap-2.5 pt-2">
+              <button id="btn-led-on" onclick="sendMQTT('led', 'on')" class="py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/80 hover:text-white">
+                BẬT
+              </button>
+              <button id="btn-led-off" onclick="sendMQTT('led', 'off')" class="py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-rose-950/80 text-rose-300 border border-rose-800/60">
+                TẮT
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 3: Quạt Tản Nhiệt -->
+          <div id="card-fan" class="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-5 flex flex-col justify-between transition-all duration-300">
+            <div>
+              <div class="flex items-start justify-between gap-3 mb-3">
+                <div class="flex items-center gap-3">
+                  <div id="icon-fan-box" class="p-3 rounded-xl bg-slate-800 text-slate-400 transition-all">
+                    <svg id="svg-fan-icon" class="w-6 h-6 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.827 16.379a6.082 6.082 0 0 1-8.618-7.002l5.412 1.45a6.082 6.082 0 0 1 7.002-8.618l-1.45 5.412a6.082 6.082 0 0 1 8.618 7.002l-5.412-1.45a6.082 6.082 0 0 1-7.002 8.618l1.45-5.412Z"/><circle cx="12" cy="12" r="2"/></svg>
+                  </div>
+                  <div>
+                    <h4 class="text-base font-bold text-white">Quạt Tản Nhiệt</h4>
+                    <p class="text-xs text-slate-400 line-clamp-1">Hạ nhiệt mặt nước</p>
+                  </div>
+                </div>
+
+                <!-- Toggle Switch -->
+                <button type="button" role="switch" onclick="toggleDevice('fan')" class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 bg-slate-700">
+                  <span id="toggle-fan-knob" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 translate-x-0"></span>
+                </button>
+              </div>
+
+              <!-- State Tag -->
+              <div class="flex items-center justify-between text-xs py-2 px-3 rounded-lg bg-slate-950/60 border border-slate-800/70 mb-4">
+                <div class="flex items-center gap-1.5">
+                  <span id="dot-fan" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                  <span id="text-fan-state" class="font-medium text-slate-400">ĐANG TẮT</span>
+                </div>
+                <span class="text-slate-400 font-mono text-[11px]">.../fan</span>
+              </div>
+            </div>
+
+            <!-- Dual Buttons -->
+            <div class="grid grid-cols-2 gap-2.5 pt-2">
+              <button id="btn-fan-on" onclick="sendMQTT('fan', 'on')" class="py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/80 hover:text-white">
+                BẬT
+              </button>
+              <button id="btn-fan-off" onclick="sendMQTT('fan', 'off')" class="py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-rose-950/80 text-rose-300 border border-rose-800/60">
+                TẮT
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 4: Máy Làm Lạnh Chiller -->
+          <div id="card-chiller" class="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-5 flex flex-col justify-between transition-all duration-300">
+            <div>
+              <div class="flex items-start justify-between gap-3 mb-3">
+                <div class="flex items-center gap-3">
+                  <div id="icon-chiller-box" class="p-3 rounded-xl bg-slate-800 text-slate-400 transition-all">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/><path d="M20 16l-4-4 4-4"/><path d="M4 8l4 4-4 4"/><path d="M16 4l-4 4-4-4"/><path d="M8 20l4-4 4 4"/></svg>
+                  </div>
+                  <div>
+                    <h4 class="text-base font-bold text-white">Máy Làm Lạnh</h4>
+                    <p class="text-xs text-slate-400 line-clamp-1">Điều hòa mát 24-26°C</p>
+                  </div>
+                </div>
+
+                <!-- Toggle Switch -->
+                <button type="button" role="switch" onclick="toggleDevice('chiller')" class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 bg-slate-700">
+                  <span id="toggle-chiller-knob" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 translate-x-0"></span>
+                </button>
+              </div>
+
+              <!-- State Tag -->
+              <div class="flex items-center justify-between text-xs py-2 px-3 rounded-lg bg-slate-950/60 border border-slate-800/70 mb-4">
+                <div class="flex items-center gap-1.5">
+                  <span id="dot-chiller" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                  <span id="text-chiller-state" class="font-medium text-slate-400">ĐANG TẮT</span>
+                </div>
+                <span class="text-slate-400 font-mono text-[11px]">.../chiller</span>
+              </div>
+            </div>
+
+            <!-- Dual Buttons -->
+            <div class="grid grid-cols-2 gap-2.5 pt-2">
+              <button id="btn-chiller-on" onclick="sendMQTT('chiller', 'on')" class="py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/80 hover:text-white">
+                BẬT
+              </button>
+              <button id="btn-chiller-off" onclick="sendMQTT('chiller', 'off')" class="py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-rose-950/80 text-rose-300 border border-rose-800/60">
+                TẮT
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- VIEW 2: LOGS & MQTT CONSOLE -->
+    <div id="view-logs" class="hidden space-y-6">
+      <div class="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 shadow-xl">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+          <div class="flex items-center gap-2.5">
+            <div class="p-2 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-white tracking-tight">
+                Nhật Ký & Truyền Thông MQTT
+              </h3>
+              <p class="text-xs text-slate-400">
+                Giám sát các bản tin gửi (Publish) và nhận (Subscribe) theo thời gian thực
+              </p>
+            </div>
+          </div>
+
+          <!-- Filters and Clear -->
+          <div class="flex items-center gap-2">
+            <div class="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+              <button id="filter-all-btn" onclick="setLogFilter('all')" class="px-2.5 py-1 rounded-md bg-slate-800 text-white font-medium">Tất cả</button>
+              <button id="filter-out-btn" onclick="setLogFilter('out')" class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white">Gửi đi</button>
+              <button id="filter-in-btn" onclick="setLogFilter('in')" class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white">Nhận về</button>
+            </div>
+            <button onclick="clearLogs()" title="Xóa toàn bộ log" class="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-rose-400 transition-colors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Terminal Output -->
+        <div class="rounded-xl bg-slate-950 border border-slate-800/90 font-mono text-xs overflow-hidden shadow-inner">
+          <div class="bg-slate-900/90 px-4 py-2 border-b border-slate-800 flex items-center justify-between text-[11px] text-slate-400 select-none">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-rose-500/80 inline-block"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block"></span>
+              <span class="ml-2 font-mono text-slate-300">live_packet_stream</span>
+            </div>
+            <span class="text-[10px]">QoS 0 · wss://broker.emqx.io</span>
+          </div>
+
+          <div id="logs-container" class="p-4 max-h-80 min-h-48 overflow-y-auto space-y-2 select-text divide-y divide-slate-900">
+            <div id="empty-log-msg" class="py-8 text-center text-slate-500 italic">
+              Chưa có bản tin MQTT nào được ghi nhận...
+            </div>
+          </div>
+        </div>
+
+        <!-- Manual Custom MQTT Publisher -->
+        <form onsubmit="handleManualPublish(event)" class="mt-4 pt-4 border-t border-slate-800/80">
+          <div class="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <span>Gửi bản tin MQTT tùy ý:</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
+            <input id="custom-topic-input" type="text" placeholder="Topic (vd: smart_aquarium/esp32s3/pump)" class="sm:col-span-6 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono">
+            <input id="custom-payload-input" type="text" placeholder="Payload (vd: on, off, 1, 0)" class="sm:col-span-4 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono">
+            <button type="submit" class="sm:col-span-2 py-2 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1 shadow-sm">
+              Gửi tin
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/80 bg-slate-950 py-6 mt-12 text-center text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="font-semibold text-slate-400">AquaSmart Control</span>
+        <span>·</span>
+        <span>Hệ thống quản lý bể cá IoT ESP32-S3</span>
+      </div>
+      <div class="text-slate-400">
+        Giao thức MQTT WebSocket · Broker EMQX
+      </div>
+    </div>
+  </footer>
+
+  <!-- Modal 1: Wiring & Arduino Code Guide -->
+  <div id="modal-wiring" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/60">
+        <div class="flex items-center gap-3">
+          <div class="p-2 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Sơ Đồ Đấu Dây & Code ESP32-S3</h3>
+            <p class="text-xs text-slate-400">Tài liệu kỹ thuật kết nối phần cứng và mã nguồn mẫu</p>
+          </div>
+        </div>
+        <button onclick="closeWiringModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="p-6 overflow-y-auto space-y-6 text-xs text-slate-300">
+        <div>
+          <h4 class="text-sm font-semibold text-white mb-2">1. Bảng phân bổ chân kết nối (Pinout)</h4>
+          <div class="rounded-xl border border-slate-800 overflow-hidden bg-slate-950/60">
+            <table class="w-full text-left font-mono text-[11px]">
+              <thead class="bg-slate-900 text-slate-400 border-b border-slate-800 font-sans">
+                <tr>
+                  <th class="py-2.5 px-3">Linh kiện</th>
+                  <th class="py-2.5 px-3">Chân ESP32-S3</th>
+                  <th class="py-2.5 px-3">Chủ đề MQTT</th>
+                  <th class="py-2.5 px-3">Tín hiệu</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800/80">
+                <tr>
+                  <td class="py-2.5 px-3 font-sans font-medium text-cyan-300">Phao Cảm Biến Mực Nước</td>
+                  <td class="py-2.5 px-3 font-bold text-amber-300">GPIO 11</td>
+                  <td class="py-2.5 px-3 text-slate-300">smart_aquarium/esp32s3/muc_nuoc</td>
+                  <td class="py-2.5 px-3 text-emerald-400">1: Đầy · 0: Cạn</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans font-medium text-white">Máy Bơm Nước (Relay 1)</td>
+                  <td class="py-2.5 px-3 text-slate-400">GPIO 4</td>
+                  <td class="py-2.5 px-3 text-slate-300">smart_aquarium/esp32s3/pump</td>
+                  <td class="py-2.5 px-3 text-cyan-400">on / off</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans font-medium text-white">Đèn LED Thủy Sinh (Relay 2)</td>
+                  <td class="py-2.5 px-3 text-slate-400">GPIO 5</td>
+                  <td class="py-2.5 px-3 text-slate-300">smart_aquarium/esp32s3/led</td>
+                  <td class="py-2.5 px-3 text-cyan-400">on / off</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans font-medium text-white">Quạt Tản Nhiệt (Relay 3)</td>
+                  <td class="py-2.5 px-3 text-slate-400">GPIO 6</td>
+                  <td class="py-2.5 px-3 text-slate-300">smart_aquarium/esp32s3/fan</td>
+                  <td class="py-2.5 px-3 text-cyan-400">on / off</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans font-medium text-white">Máy Làm Lạnh Chiller (Relay 4)</td>
+                  <td class="py-2.5 px-3 text-slate-400">GPIO 7</td>
+                  <td class="py-2.5 px-3 text-slate-300">smart_aquarium/esp32s3/chiller</td>
+                  <td class="py-2.5 px-3 text-cyan-400">on / off</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <h4 class="text-sm font-semibold text-white">2. Mã nguồn mẫu cho ESP32-S3 (Arduino IDE)</h4>
+            <button onclick="copyArduinoCode()" class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors">
+              <span id="copy-btn-text">Sao chép mã</span>
+            </button>
+          </div>
+          <div class="rounded-xl bg-slate-950 border border-slate-800 p-4 font-mono text-[11px] overflow-x-auto max-h-60 text-slate-300 leading-relaxed">
+            <pre id="arduino-code-block">/*
+ * Smart Aquarium Control - ESP32-S3
+ * Broker: broker.emqx.io (Port 1883 TCP hoặc 8084 WSS)
+ */
+#include &lt;WiFi.h&gt;
+#include &lt;PubSubClient.h&gt;
+
+const char* ssid = "YOUR_WIFI";
+const char* password = "YOUR_PASSWORD";
+const char* mqtt_server = "broker.emqx.io";
+
+const int PIN_PHAO = 11;
+const int PIN_PUMP = 4;
+const int PIN_LED = 5;
+const int PIN_FAN = 6;
+const int PIN_CHILLER = 7;
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+int lastWaterState = -1;
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  String msg = "";
+  for (int i = 0; i &lt; length; i++) msg += (char)payload[i];
+  String t = String(topic);
+
+  if (t.endsWith("/pump")) digitalWrite(PIN_PUMP, msg == "on" ? HIGH : LOW);
+  else if (t.endsWith("/led")) digitalWrite(PIN_LED, msg == "on" ? HIGH : LOW);
+  else if (t.endsWith("/fan")) digitalWrite(PIN_FAN, msg == "on" ? HIGH : LOW);
+  else if (t.endsWith("/chiller")) digitalWrite(PIN_CHILLER, msg == "on" ? HIGH : LOW);
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    String clientId = "ESP32S3_" + String(random(0xffff), HEX);
+    if (client.connect(clientId.c_str())) {
+      client.subscribe("smart_aquarium/esp32s3/pump");
+      client.subscribe("smart_aquarium/esp32s3/led");
+      client.subscribe("smart_aquarium/esp32s3/fan");
+      client.subscribe("smart_aquarium/esp32s3/chiller");
+    } else {
+      delay(3000);
+    }
+  }
+}
+
+void setup() {
+  pinMode(PIN_PHAO, INPUT_PULLUP);
+  pinMode(PIN_PUMP, OUTPUT);
+  pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_FAN, OUTPUT);
+  pinMode(PIN_CHILLER, OUTPUT);
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) delay(500);
+
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+}
+
+void loop() {
+  if (!client.connected()) reconnect();
+  client.loop();
+
+  int state = digitalRead(PIN_PHAO);
+  if (state != lastWaterState) {
+    lastWaterState = state;
+    client.publish("smart_aquarium/esp32s3/muc_nuoc", state == HIGH ? "1" : "0");
+  }
+  delay(150);
+}</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="px-6 py-3.5 border-t border-slate-800 bg-slate-950/60 flex justify-end">
+        <button onclick="closeWiringModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs transition-colors">
+          Đóng
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 2: Settings Broker MQTT -->
+  <div id="modal-settings" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/60">
+        <div class="flex items-center gap-3">
+          <div class="p-2 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Cấu Hình MQTT Broker</h3>
+            <p class="text-xs text-slate-400">Tùy chỉnh thông số WebSocket và chủ đề</p>
+          </div>
+        </div>
+        <button onclick="closeSettingsModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <form onsubmit="saveSettings(event)" class="p-6 space-y-4 text-xs">
+        <div>
+          <label class="block text-slate-300 font-medium mb-1.5">Broker WebSocket URL (WSS)</label>
+          <input id="cfg-broker" type="text" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:outline-none focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-medium mb-1.5">Tiền tố chủ đề (Base Topic)</label>
+          <input id="cfg-topic" type="text" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:outline-none focus:border-cyan-500">
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-medium mb-1.5">Client ID</label>
+          <input id="cfg-clientid" type="text" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:outline-none focus:border-cyan-500">
+        </div>
+
+        <div class="flex items-center justify-between pt-4 border-t border-slate-800 mt-6">
+          <button type="button" onclick="resetDefaultConfig()" class="text-slate-400 hover:text-white text-xs underline">
+            Khôi phục mặc định
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="closeSettingsModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-medium">Hủy</button>
+            <button type="submit" class="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold shadow-md shadow-cyan-950/40">Lưu & Kết nối</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MAIN LOGIC JAVASCRIPT -->
   <script>
-    // Kết nối qua cổng WebSocket bảo mật (WSS 8084) của EMQX
-    const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
-    const clientId = 'web_client_' + Math.random().toString(16).substr(2, 8);
+    // Configuration & State
+    let config = {
+      brokerUrl: 'wss://broker.emqx.io:8084/mqtt',
+      clientId: 'web_client_' + Math.random().toString(16).substr(2, 8),
+      baseTopic: 'smart_aquarium/esp32s3'
+    };
 
-    const client = mqtt.connect(brokerUrl, {
-      clientId: clientId,
-      clean: true,
-      connectTimeout: 4000
-    });
+    const savedConfig = localStorage.getItem('aqua_config');
+    if (savedConfig) {
+      try { config = JSON.parse(savedConfig); } catch (e) {}
+    }
 
-    const statusEl = document.getElementById('conn-status');
-    const phaoEl = document.getElementById('phao-display');
+    let client = null;
+    let isConnected = false;
 
-    client.on('connect', () => {
-      statusEl.innerText = 'Đã kết nối Broker EMQX';
-      statusEl.style.backgroundColor = '#55efc4';
-      statusEl.style.color = '#00b894';
+    // Device States
+    const devices = {
+      pump: 'off',
+      led: 'off',
+      fan: 'off',
+      chiller: 'off'
+    };
 
-      // Đăng ký nhận tin từ topic phao nước của ESP32
-      client.subscribe('smart_aquarium/esp32s3/muc_nuoc', (err) => {
-        if (!err) {
-          console.log('Subscribed to topic muc_nuoc');
+    // Sequential Relay Test State (Rhythmic Dance Mode)
+    let isRelayTesting = false;
+    let testStep = 0; // 0 to 7 (4 relays ON sequentially, then 4 relays OFF sequentially)
+    let isLooping = true; // Continuous rhythmic dance by default
+    let testSpeedMs = 300; // 300ms between each relay step
+    let testTimer = null;
+    let audioCtx = null;
+    const RELAYS = ['pump', 'led', 'fan', 'chiller'];
+    const RELAY_NAMES_VI = {
+      pump: 'Máy Bơm',
+      led: 'Đèn LED',
+      fan: 'Quạt Tản Nhiệt',
+      chiller: 'Máy Làm Lạnh'
+    };
+
+    // Feeding Mode Timer
+    let feedingTimer = null;
+    let feedingSeconds = 0;
+
+    // Logs Array
+    let logs = [];
+    let logFilter = 'all';
+
+    // Toast helper
+    function showToast(msg) {
+      const box = document.getElementById('toast-box');
+      const text = document.getElementById('toast-text');
+      text.innerText = msg;
+      box.classList.remove('opacity-0', 'translate-y-[-20px]', 'pointer-events-none');
+      box.classList.add('opacity-100', 'translate-y-0');
+      setTimeout(() => {
+        box.classList.add('opacity-0', 'translate-y-[-20px]', 'pointer-events-none');
+        box.classList.remove('opacity-100', 'translate-y-0');
+      }, 3500);
+    }
+
+    // Connect MQTT
+    function initMQTT() {
+      if (client) {
+        try { client.end(true); } catch (e) {}
+      }
+
+      updateConnBadge('connecting', 'Đang kết nối EMQX...');
+
+      client = mqtt.connect(config.brokerUrl, {
+        clientId: config.clientId,
+        clean: true,
+        connectTimeout: 6000,
+        reconnectPeriod: 4000
+      });
+
+      client.on('connect', () => {
+        isConnected = true;
+        updateConnBadge('connected', 'Đã kết nối EMQX');
+        showToast('Đã kết nối thành công tới MQTT Broker');
+
+        // Subscribe to water level
+        const waterTopic = config.baseTopic + '/muc_nuoc';
+        client.subscribe(waterTopic, (err) => {
+          if (!err) console.log('Subscribed to ' + waterTopic);
+        });
+
+        // Also subscribe wildcard to catch all feedback
+        client.subscribe(config.baseTopic + '/#');
+      });
+
+      client.on('error', (err) => {
+        isConnected = false;
+        updateConnBadge('error', 'Lỗi kết nối MQTT');
+        console.error('MQTT error:', err);
+      });
+
+      client.on('offline', () => {
+        isConnected = false;
+        updateConnBadge('disconnected', 'Ngoại tuyến');
+      });
+
+      client.on('reconnect', () => {
+        updateConnBadge('connecting', 'Đang thử kết nối lại...');
+      });
+
+      client.on('message', (topic, message) => {
+        const payload = message.toString();
+        addLog('in', topic, payload);
+
+        // Water level handling
+        if (topic === config.baseTopic + '/muc_nuoc' || topic.endsWith('/muc_nuoc')) {
+          handleWaterLevelPayload(payload);
+        }
+
+        // Hardware feedback for devices
+        for (const dev of RELAYS) {
+          if (topic === config.baseTopic + '/' + dev || topic.endsWith('/' + dev)) {
+            const cmd = payload.trim().toLowerCase();
+            if (cmd === 'on' || cmd === 'off') {
+              updateDeviceUI(dev, cmd);
+            }
+          }
         }
       });
-    });
+    }
 
-    client.on('error', (err) => {
-      statusEl.innerText = 'Lỗi kết nối MQTT';
-      statusEl.style.backgroundColor = '#ff7675';
-      statusEl.style.color = '#fff';
-      console.error(err);
-    });
+    function reconnectMQTT() {
+      initMQTT();
+    }
 
-    // Nhận dữ liệu từ ESP32 gửi lên
-    client.on('message', (topic, message) => {
-      const payload = message.toString();
-      console.log(`[${topic}]: ${payload}`);
+    function updateConnBadge(status, label) {
+      const badge = document.getElementById('conn-badge');
+      const dot = document.getElementById('conn-dot');
+      const text = document.getElementById('conn-text');
+      const icon = document.getElementById('conn-icon');
 
-      if (topic === 'smart_aquarium/esp32s3/muc_nuoc') {
-        if (payload === '1') {
-          phaoEl.innerText = 'NƯỚC ĐẦY (1)';
-          phaoEl.className = 'sensor-val val-full';
-        } else if (payload === '0') {
-          phaoEl.innerText = 'CẠN NƯỚC (0)';
-          phaoEl.className = 'sensor-val val-low';
-        }
-      }
-    });
+      text.innerText = label;
 
-    // Hàm gửi lệnh xuống ESP32
-    function sendMQTT(topic, cmd) {
-      if (client.connected) {
-        client.publish(topic, cmd);
-        console.log(`Sent [${topic}]: ${cmd}`);
+      if (status === 'connected') {
+        badge.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-emerald-950/60 border-emerald-700/50 text-emerald-300 transition-all';
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+        icon.className = 'w-4 h-4 text-emerald-400';
+      } else if (status === 'connecting') {
+        badge.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-amber-950/60 border-amber-700/50 text-amber-300 transition-all';
+        dot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse';
+        icon.className = 'w-4 h-4 text-amber-400 animate-spin';
       } else {
-        alert('Chưa kết nối tới Broker!');
+        badge.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium bg-rose-950/60 border-rose-700/50 text-rose-300 transition-all';
+        dot.className = 'w-2 h-2 rounded-full bg-rose-400';
+        icon.className = 'w-4 h-4 text-rose-400';
       }
     }
+
+    // Publish MQTT Command
+    function sendMQTT(topicSuffix, cmd) {
+      const fullTopic = config.baseTopic + '/' + topicSuffix;
+      let sent = false;
+
+      if (client && isConnected) {
+        client.publish(fullTopic, cmd);
+        sent = true;
+      } else {
+        showToast('Chưa kết nối tới Broker! Đang cập nhật nội bộ.');
+      }
+
+      // Optimistic UI update
+      updateDeviceUI(topicSuffix, cmd);
+      addLog('out', fullTopic, cmd);
+    }
+
+    // Update Device UI Card
+    function updateDeviceUI(device, state) {
+      devices[device] = state;
+      const isOn = state === 'on';
+
+      const card = document.getElementById('card-' + device);
+      const iconBox = document.getElementById('icon-' + device + '-box');
+      const knob = document.getElementById('toggle-' + device + '-knob');
+      const dot = document.getElementById('dot-' + device);
+      const textState = document.getElementById('text-' + device + '-state');
+      const btnOn = document.getElementById('btn-' + device + '-on');
+      const btnOff = document.getElementById('btn-' + device + '-off');
+
+      if (isOn) {
+        card.className = 'rounded-2xl border border-slate-700/80 bg-slate-900/95 p-5 flex flex-col justify-between shadow-lg shadow-slate-950/40 transition-all duration-300';
+        knob.className = 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 translate-x-5';
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+        textState.className = 'font-bold text-emerald-300';
+        textState.innerText = 'ĐANG BẬT';
+
+        btnOn.className = 'py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-emerald-600 text-white shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400/30';
+        btnOff.className = 'py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-slate-800 text-slate-300 hover:bg-rose-600 hover:text-white border border-slate-700';
+
+        if (device === 'fan') {
+          document.getElementById('svg-fan-icon').classList.add('animate-spin');
+        }
+      } else {
+        card.className = 'rounded-2xl border border-slate-800/80 bg-slate-900/60 p-5 flex flex-col justify-between transition-all duration-300';
+        knob.className = 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 translate-x-0';
+        dot.className = 'w-2 h-2 rounded-full bg-slate-500';
+        textState.className = 'font-medium text-slate-400';
+        textState.innerText = 'ĐANG TẮT';
+
+        btnOn.className = 'py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/80 hover:text-white';
+        btnOff.className = 'py-2.5 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 bg-rose-950/80 text-rose-300 border border-rose-800/60';
+
+        if (device === 'fan') {
+          document.getElementById('svg-fan-icon').classList.remove('animate-spin');
+        }
+      }
+
+      // Update active device count
+      let count = 0;
+      for (const k in devices) {
+        if (devices[k] === 'on') count++;
+      }
+      document.getElementById('stat-active-count').innerText = count;
+    }
+
+    function toggleDevice(device) {
+      const next = devices[device] === 'on' ? 'off' : 'on';
+      sendMQTT(device, next);
+    }
+
+    function sendAll(state) {
+      RELAYS.forEach(r => sendMQTT(r, state));
+      showToast(state === 'on' ? 'Đã bật tất cả thiết bị' : 'Đã ngắt toàn bộ thiết bị');
+    }
+
+    // Water level telemetry parser
+    function handleWaterLevelPayload(payload) {
+      const trimmed = payload.trim();
+      const badge = document.getElementById('phao-display-badge');
+      const ball = document.getElementById('float-sensor-ball');
+      const tankWater = document.getElementById('tank-water-body');
+      const label = document.getElementById('tank-water-percent-label');
+      const statText = document.getElementById('stat-water-text');
+      const statIconBg = document.getElementById('stat-water-icon-bg');
+      const healthText = document.getElementById('stat-health-text');
+      const healthIconBg = document.getElementById('stat-health-icon-bg');
+      const alertBox = document.getElementById('tank-safety-alert');
+      const normalBox = document.getElementById('tank-normal-alert');
+      const glow = document.getElementById('tank-ambient-glow');
+
+      const now = new Date().toLocaleTimeString('vi-VN');
+      document.getElementById('detail-phao-val').innerText = 'Giá trị: ' + trimmed;
+      document.getElementById('detail-phao-time').innerText = now;
+
+      if (trimmed === '1') {
+        badge.className = 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-950/80 border border-cyan-800/80 text-cyan-300 font-bold text-xs sm:text-sm';
+        badge.innerHTML = '<span>NƯỚC ĐẦY (1)</span>';
+
+        ball.className = 'w-7 h-5 rounded-full border border-slate-400 shadow-md transition-all duration-700 flex items-center justify-center -translate-y-20 bg-cyan-200 text-cyan-950';
+        tankWater.style.height = '82%';
+        tankWater.className = 'w-full transition-all duration-1000 relative overflow-hidden bg-gradient-to-t from-cyan-950/90 via-blue-900/60 to-cyan-800/40';
+
+        label.innerText = 'Mực nước an toàn: 85%';
+        label.className = 'text-xs font-mono font-bold tracking-wider uppercase text-cyan-200/90 drop-shadow';
+
+        statText.innerText = 'NƯỚC ĐẦY (1)';
+        statText.className = 'text-xs sm:text-sm font-bold text-cyan-300';
+        statIconBg.className = 'p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400';
+
+        healthText.innerText = 'Hoạt Động Tốt';
+        healthText.className = 'text-xs sm:text-sm font-bold text-emerald-400';
+        healthIconBg.className = 'p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400';
+
+        alertBox.classList.add('hidden');
+        normalBox.classList.remove('hidden');
+        glow.className = 'absolute -top-24 -right-24 w-72 h-72 rounded-full blur-3xl pointer-events-none transition-all duration-700 bg-cyan-500/10';
+      } else if (trimmed === '0') {
+        badge.className = 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-950/80 border border-rose-800/80 text-rose-300 font-bold text-xs sm:text-sm animate-pulse';
+        badge.innerHTML = '<span>CẠN NƯỚC (0)</span>';
+
+        ball.className = 'w-7 h-5 rounded-full border border-slate-400 shadow-md transition-all duration-700 flex items-center justify-center -translate-y-4 bg-amber-400 text-amber-950';
+        tankWater.style.height = '24%';
+        tankWater.className = 'w-full transition-all duration-1000 relative overflow-hidden bg-gradient-to-t from-rose-950/80 via-amber-950/50 to-amber-900/40';
+
+        label.innerText = 'Cảnh báo mực nước thấp: 20%';
+        label.className = 'text-xs font-mono font-bold tracking-wider uppercase text-rose-300 drop-shadow animate-pulse';
+
+        statText.innerText = 'CẠN NƯỚC (0)';
+        statText.className = 'text-xs sm:text-sm font-bold text-rose-400';
+        statIconBg.className = 'p-2.5 rounded-lg bg-rose-500/10 text-rose-400';
+
+        healthText.innerText = 'Cảnh Báo Cạn';
+        healthText.className = 'text-xs sm:text-sm font-bold text-amber-400';
+        healthIconBg.className = 'p-2.5 rounded-lg bg-amber-500/10 text-amber-400';
+
+        alertBox.classList.remove('hidden');
+        normalBox.classList.add('hidden');
+        glow.className = 'absolute -top-24 -right-24 w-72 h-72 rounded-full blur-3xl pointer-events-none transition-all duration-700 bg-amber-600/15';
+      }
+    }
+
+    function simulateWater(level) {
+      handleWaterLevelPayload(level);
+      showToast(level === '1' ? 'Mô phỏng phao: NƯỚC ĐẦY (1)' : 'Mô phỏng phao: CẠN NƯỚC (0)');
+    }
+
+    function emergencyStopPump() {
+      sendMQTT('pump', 'off');
+      showToast('Đã ngắt máy bơm khẩn cấp để bảo vệ động cơ!');
+    }
+
+    // ==========================================
+    // CÔNG TẮC TEST TUẦN TỰ RELAY (SEQUENTIAL TEST)
+    // ==========================================
+    function playRelayClickSound(isOn) {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(isOn ? 1100 : 700, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.035);
+        gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.035);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.035);
+      } catch (e) {}
+    }
+
+    // ==========================================
+    // CÔNG TẮC TEST NHỊP ĐIỆU RELAY (TIẾP ĐIỂM NHẢY MÚA)
+    // ==========================================
+    function toggleRelaySequenceTest() {
+      if (isRelayTesting) {
+        stopRelaySequenceTest();
+      } else {
+        startRelaySequenceTest();
+      }
+    }
+
+    function startRelaySequenceTest() {
+      // First turn all off cleanly
+      sendAll('off');
+      testStep = 0;
+      isRelayTesting = true;
+
+      // Update UI switch
+      const card = document.getElementById('relay-test-card');
+      const knob = document.getElementById('relay-test-knob');
+      const sw = document.getElementById('relay-test-switch');
+      const btn = document.getElementById('relay-test-btn');
+      const btnText = document.getElementById('relay-test-btn-text');
+      const btnIcon = document.getElementById('relay-test-btn-icon');
+      const liveBadge = document.getElementById('relay-test-live-badge');
+      const iconBox = document.getElementById('relay-test-icon-box');
+
+      card.className = 'p-4 rounded-xl border border-amber-500/80 bg-amber-950/40 shadow-xl shadow-amber-950/30 transition-all duration-300 ring-1 ring-amber-500/40';
+      sw.className = 'relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out bg-amber-500';
+      knob.className = 'pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out translate-x-7';
+      btn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-950/40';
+      btnText.innerText = 'DỪNG TEST';
+      btnIcon.outerHTML = '<svg id="relay-test-btn-icon" class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>';
+      liveBadge.classList.remove('hidden');
+      iconBox.className = 'p-2.5 rounded-xl bg-amber-500 text-slate-950 animate-pulse shadow-md shadow-amber-500/30';
+
+      showToast('Kích hoạt tiếp điểm nhảy múa: Bật lần lượt (300ms) → Tắt lần lượt (300ms)');
+      runTestStep();
+    }
+
+    function stopRelaySequenceTest() {
+      if (testTimer) {
+        clearTimeout(testTimer);
+        testTimer = null;
+      }
+      isRelayTesting = false;
+      testStep = 0;
+
+      // Turn all off safely
+      sendAll('off');
+
+      // Reset Step Badges to OFF
+      for (let i = 0; i < 4; i++) {
+        document.getElementById('step-badge-' + i).className = 'px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 bg-slate-900 border-slate-800 text-slate-400 transition-all';
+        const tag = document.getElementById('step-tag-' + i);
+        tag.className = 'text-[9px] font-bold px-1 rounded uppercase bg-slate-800 text-slate-400';
+        tag.innerText = 'TẮT';
+      }
+
+      // Reset description text
+      document.getElementById('relay-test-desc').innerText = 'Bật lần lượt từng relay cách nhau 300ms → Tắt lần lượt từng relay cách nhau 300ms';
+
+      // Reset Switch UI
+      const card = document.getElementById('relay-test-card');
+      const knob = document.getElementById('relay-test-knob');
+      const sw = document.getElementById('relay-test-switch');
+      const btn = document.getElementById('relay-test-btn');
+      const btnText = document.getElementById('relay-test-btn-text');
+      const btnIcon = document.getElementById('relay-test-btn-icon');
+      const liveBadge = document.getElementById('relay-test-live-badge');
+      const iconBox = document.getElementById('relay-test-icon-box');
+
+      card.className = 'p-4 rounded-xl border border-slate-800 bg-slate-950/70 transition-all duration-300';
+      sw.className = 'relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out bg-slate-700';
+      knob.className = 'pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out translate-x-0';
+      btn.className = 'px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 shadow';
+      btnText.innerText = 'BẬT TEST';
+      btnIcon.outerHTML = '<svg id="relay-test-btn-icon" class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+      liveBadge.classList.add('hidden');
+      iconBox.className = 'p-2.5 rounded-xl bg-slate-800 text-slate-400 transition-colors';
+
+      showToast('Đã dừng test nhịp điệu. Đã ngắt toàn bộ tiếp điểm relay.');
+    }
+
+    function runTestStep() {
+      if (!isRelayTesting) return;
+
+      // 8 beats in 1 rhythm wave:
+      // Beat 0: Bơm ON
+      // Beat 1: LED ON
+      // Beat 2: Quạt ON
+      // Beat 3: Chiller ON
+      // Beat 4: Bơm OFF
+      // Beat 5: LED OFF
+      // Beat 6: Quạt OFF
+      // Beat 7: Chiller OFF
+
+      const isPhaseTurnOn = testStep < 4;
+      const relayIdx = isPhaseTurnOn ? testStep : (testStep - 4);
+      const dev = RELAYS[relayIdx];
+      const cmd = isPhaseTurnOn ? 'on' : 'off';
+
+      // Play soft mechanical click sound
+      playRelayClickSound(isPhaseTurnOn);
+
+      // Execute MQTT action
+      sendMQTT(dev, cmd);
+
+      // Update badge of the active device
+      const badge = document.getElementById('step-badge-' + relayIdx);
+      const tag = document.getElementById('step-tag-' + relayIdx);
+
+      if (isPhaseTurnOn) {
+        badge.className = 'px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 bg-emerald-950/70 border-emerald-500 text-emerald-200 shadow-md ring-1 ring-emerald-500/50 transition-all';
+        tag.className = 'text-[9px] font-bold px-1 rounded uppercase bg-emerald-500 text-slate-950';
+        tag.innerText = 'BẬT';
+      } else {
+        badge.className = 'px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 bg-rose-950/60 border-rose-600/70 text-rose-300 transition-all';
+        tag.className = 'text-[9px] font-bold px-1 rounded uppercase bg-rose-600 text-white';
+        tag.innerText = 'TẮT';
+      }
+
+      // Update description text with current beat
+      const descEl = document.getElementById('relay-test-desc');
+      if (isPhaseTurnOn) {
+        descEl.innerHTML = `<span class="text-emerald-400 font-bold">Pha 1 (BẬT LẦN LƯỢT):</span> Đóng tiếp điểm <b class="text-white">${RELAY_NAMES_VI[dev]}</b> (${testStep + 1}/4) [${testSpeedMs}ms]`;
+      } else {
+        descEl.innerHTML = `<span class="text-rose-400 font-bold">Pha 2 (TẮT LẦN LƯỢT):</span> Ngắt tiếp điểm <b class="text-white">${RELAY_NAMES_VI[dev]}</b> (${testStep - 3}/4) [${testSpeedMs}ms]`;
+      }
+
+      // Schedule next beat
+      testTimer = setTimeout(() => {
+        testStep++;
+        if (testStep >= 8) {
+          if (isLooping) {
+            testStep = 0;
+            runTestStep();
+          } else {
+            stopRelaySequenceTest();
+            showToast('Đã hoàn thành 1 chu kỳ sóng nhịp điệu (Bật lần lượt → Tắt lần lượt)!');
+          }
+        } else {
+          runTestStep();
+        }
+      }, testSpeedMs);
+    }
+
+    function setTestSpeed(ms) {
+      testSpeedMs = ms;
+      [150, 300, 500, 800].forEach(s => {
+        const b = document.getElementById('speed-btn-' + s);
+        if (b) {
+          if (s === ms) {
+            b.className = 'px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-bold transition-colors';
+          } else {
+            b.className = 'px-1.5 py-0.5 rounded text-slate-400 hover:text-white transition-colors';
+          }
+        }
+      });
+      showToast('Đã chỉnh nhịp độ đóng ngắt sang ' + ms + 'ms');
+    }
+
+    function toggleLoopMode() {
+      isLooping = !isLooping;
+      const btn = document.getElementById('loop-mode-btn');
+      const txt = document.getElementById('loop-mode-text');
+      if (isLooping) {
+        btn.className = 'px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 bg-amber-950/60 border-amber-600 text-amber-300 transition-colors';
+        txt.innerText = 'Nhảy múa liên tục';
+        showToast('Chế độ: Nhảy múa liên tục theo nhịp');
+      } else {
+        btn.className = 'px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 bg-slate-900 border-slate-800 text-slate-400 hover:text-white transition-colors';
+        txt.innerText = 'Chạy 1 nhịp rồi dừng';
+        showToast('Chế độ: Chạy 1 nhịp (Bật lần lượt → Tắt lần lượt) rồi dừng');
+      }
+    }
+
+    // Feeding Mode (5 minutes)
+    function triggerFeedingMode() {
+      if (isRelayTesting) stopRelaySequenceTest();
+      sendMQTT('pump', 'off');
+      feedingSeconds = 300;
+
+      const badge = document.getElementById('feeding-timer-badge');
+      badge.classList.remove('hidden');
+      badge.classList.add('flex');
+
+      if (feedingTimer) clearInterval(feedingTimer);
+      feedingTimer = setInterval(() => {
+        feedingSeconds--;
+        const m = Math.floor(feedingSeconds / 60);
+        const s = feedingSeconds % 60;
+        document.getElementById('feeding-time-left').innerText = 
+          (m < 10 ? '0' + m : m) + ':' + (s < 10 ? '0' + s : s);
+
+        if (feedingSeconds <= 0) {
+          cancelFeeding();
+          sendMQTT('pump', 'on');
+          showToast('Hết thời gian cho ăn. Máy bơm đã được bật lại!');
+        }
+      }, 1000);
+
+      showToast('Đã kích hoạt chế độ cho cá ăn (Bơm tạm dừng 5 phút)');
+    }
+
+    function cancelFeeding() {
+      if (feedingTimer) {
+        clearInterval(feedingTimer);
+        feedingTimer = null;
+      }
+      document.getElementById('feeding-timer-badge').classList.add('hidden');
+      document.getElementById('feeding-timer-badge').classList.remove('flex');
+    }
+
+    function triggerNightMode() {
+      if (isRelayTesting) stopRelaySequenceTest();
+      sendMQTT('led', 'off');
+      sendMQTT('pump', 'on');
+      sendMQTT('fan', 'on');
+      showToast('Kích hoạt chế độ ban đêm: Tắt đèn LED, giữ bơm và quạt');
+    }
+
+    // Tab Navigation
+    function switchTab(tab) {
+      const vDash = document.getElementById('view-dashboard');
+      const vLogs = document.getElementById('view-logs');
+      const bDash = document.getElementById('nav-btn-dashboard');
+      const bLogs = document.getElementById('nav-btn-logs');
+      const mobDash = document.getElementById('mob-nav-dashboard');
+      const mobLogs = document.getElementById('mob-nav-logs');
+
+      if (tab === 'dashboard') {
+        vDash.classList.remove('hidden');
+        vLogs.classList.add('hidden');
+        bDash.className = 'px-3.5 py-1.5 rounded-lg bg-slate-800 text-cyan-300 font-semibold transition-colors';
+        bLogs.className = 'px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-900 transition-colors';
+        mobDash.className = 'flex-1 py-1.5 rounded-md text-xs font-semibold text-center bg-cyan-950 text-cyan-300 border border-cyan-800';
+        mobLogs.className = 'flex-1 py-1.5 rounded-md text-xs font-semibold text-center text-slate-400 bg-slate-900';
+      } else {
+        vDash.classList.add('hidden');
+        vLogs.classList.remove('hidden');
+        bDash.className = 'px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-900 transition-colors';
+        bLogs.className = 'px-3.5 py-1.5 rounded-lg bg-slate-800 text-cyan-300 font-semibold transition-colors';
+        mobDash.className = 'flex-1 py-1.5 rounded-md text-xs font-semibold text-center text-slate-400 bg-slate-900';
+        mobLogs.className = 'flex-1 py-1.5 rounded-md text-xs font-semibold text-center bg-cyan-950 text-cyan-300 border border-cyan-800';
+      }
+    }
+
+    // Logs System
+    function addLog(dir, topic, payload) {
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+      const entry = { id: Math.random().toString(), dir, topic, payload, timeStr };
+      logs.unshift(entry);
+      if (logs.length > 120) logs.pop();
+      renderLogs();
+    }
+
+    function setLogFilter(f) {
+      logFilter = f;
+      ['all', 'out', 'in'].forEach(item => {
+        const btn = document.getElementById('filter-' + item + '-btn');
+        if (item === f) {
+          btn.className = 'px-2.5 py-1 rounded-md bg-slate-800 text-white font-medium';
+        } else {
+          btn.className = 'px-2.5 py-1 rounded-md text-slate-400 hover:text-white';
+        }
+      });
+      renderLogs();
+    }
+
+    function clearLogs() {
+      logs = [];
+      renderLogs();
+      showToast('Đã xóa toàn bộ nhật ký gói tin');
+    }
+
+    function renderLogs() {
+      const container = document.getElementById('logs-container');
+      const filtered = logs.filter(l => logFilter === 'all' || l.dir === logFilter);
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div class="py-8 text-center text-slate-500 italic">Chưa có bản tin MQTT nào được ghi nhận...</div>';
+        return;
+      }
+
+      container.innerHTML = filtered.map(l => {
+        const isOut = l.dir === 'out';
+        const isSuccessVal = l.payload === 'on' || l.payload === '1';
+        return `
+          <div class="pt-2 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]">
+            <div class="flex items-center gap-2">
+              <span class="text-slate-500 tabular-nums shrink-0">[${l.timeStr}]</span>
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${isOut ? 'bg-cyan-950 text-cyan-300 border border-cyan-800' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'}">
+                ${isOut ? '↑ GỬI' : '↓ NHẬN'}
+              </span>
+              <span class="text-slate-300 font-semibold break-all">${l.topic}</span>
+            </div>
+            <div class="pl-4 sm:pl-0 flex items-center gap-2 shrink-0">
+              <span class="text-slate-400 text-[10px]">Dữ liệu:</span>
+              <span class="px-2 py-0.5 rounded font-mono font-bold ${isSuccessVal ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-700/60' : 'bg-rose-900/60 text-rose-300 border border-rose-700/60'}">
+                ${l.payload}
+              </span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function handleManualPublish(e) {
+      e.preventDefault();
+      const tInput = document.getElementById('custom-topic-input');
+      const pInput = document.getElementById('custom-payload-input');
+      const topic = tInput.value.trim();
+      const payload = pInput.value.trim();
+
+      if (!topic || !payload) return;
+
+      if (client && isConnected) {
+        client.publish(topic, payload);
+        addLog('out', topic, payload);
+        showToast('Đã gửi bản tin tới: ' + topic);
+      } else {
+        showToast('Chưa kết nối MQTT broker!');
+      }
+    }
+
+    // Modal Helpers
+    function openWiringModal() {
+      document.getElementById('modal-wiring').classList.remove('hidden');
+    }
+    function closeWiringModal() {
+      document.getElementById('modal-wiring').classList.add('hidden');
+    }
+
+    function copyArduinoCode() {
+      const code = document.getElementById('arduino-code-block').innerText;
+      navigator.clipboard.writeText(code).then(() => {
+        document.getElementById('copy-btn-text').innerText = '✓ Đã sao chép';
+        setTimeout(() => {
+          document.getElementById('copy-btn-text').innerText = 'Sao chép mã';
+        }, 2000);
+      });
+    }
+
+    function openSettingsModal() {
+      document.getElementById('cfg-broker').value = config.brokerUrl;
+      document.getElementById('cfg-topic').value = config.baseTopic;
+      document.getElementById('cfg-clientid').value = config.clientId;
+      document.getElementById('modal-settings').classList.remove('hidden');
+    }
+    function closeSettingsModal() {
+      document.getElementById('modal-settings').classList.add('hidden');
+    }
+
+    function resetDefaultConfig() {
+      document.getElementById('cfg-broker').value = 'wss://broker.emqx.io:8084/mqtt';
+      document.getElementById('cfg-topic').value = 'smart_aquarium/esp32s3';
+      document.getElementById('cfg-clientid').value = 'web_client_' + Math.random().toString(16).substr(2, 8);
+    }
+
+    function saveSettings(e) {
+      e.preventDefault();
+      config.brokerUrl = document.getElementById('cfg-broker').value.trim();
+      config.baseTopic = document.getElementById('cfg-topic').value.trim();
+      config.clientId = document.getElementById('cfg-clientid').value.trim();
+
+      localStorage.setItem('aqua_config', JSON.stringify(config));
+      document.getElementById('detail-phao-topic').innerText = config.baseTopic + '/muc_nuoc';
+      document.getElementById('custom-topic-input').value = config.baseTopic + '/';
+
+      closeSettingsModal();
+      showToast('Đã lưu cấu hình MQTT và kết nối lại');
+      initMQTT();
+    }
+
+    // Document Init
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('custom-topic-input').value = config.baseTopic + '/';
+      document.getElementById('custom-payload-input').value = 'on';
+      document.getElementById('detail-phao-topic').innerText = config.baseTopic + '/muc_nuoc';
+
+      // Start MQTT
+      initMQTT();
+    });
   </script>
 </body>
 </html>
